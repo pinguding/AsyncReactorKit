@@ -1,0 +1,15 @@
+{
+  "originHash" : "553c45adb29dc0ffa56b5bf9f57c48fab030704516822b69bdf553a337100630",
+  "pins" : [
+    {
+      "identity" : "dynamictypedictionary",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pinguding/DynamicTypeDictionary.git",
+      "state" : {
+        "revision" : "a4ded73a369b7bb86a341668ec4bbce382a198d0",
+        "version" : "1.0.0"
+      }
+    }
+  ],
+  "version" : 3
+}
