@@ -51,7 +51,7 @@ import DynamicTypeDictionary
  *     }
  *     
  *     @objc private func incrementTapped() {
- *         self.send(.increment)
+ *         send(.increment)
  *     }
  *     
  *     @objc private func decrementTapped() {
@@ -67,7 +67,7 @@ import DynamicTypeDictionary
  * }
  * ```
  */
-@preconcurrency public protocol Store: AnyObject {
+public protocol Store: AnyObject {
 
     /// The type of reactor this store works with.
     ///
@@ -133,21 +133,37 @@ public extension Store {
     /// 2. Waits for the reactor to process the input and return a new state
     /// 3. Calls the `state(_:)` method with the new state
     ///
+    /// The method uses `UnCheckedSendable` to safely pass non-Sendable objects
+    /// across concurrency boundaries, ensuring thread safety in the async context.
+    ///
     /// - Parameter input: The input to send to the reactor.
     ///
     /// ## Usage Example
     ///
     /// ```swift
-    /// // In a view controller
+    /// // In a view controller - direct synchronous call
     /// @IBAction func refreshButtonTapped() {
-    ///     self.send(.refresh)
+    ///     send(.refresh)
     /// }
     /// 
-    /// // In SwiftUI
+    /// // In SwiftUI - direct synchronous call
     /// Button("Load Data") {
-    ///     self.send(.loadData)
+    ///     store.send(.loadData)
+    /// }
+    /// 
+    /// // For custom async operations
+    /// func performComplexOperation() {
+    ///     send(.startLoading)
+    ///     // The reactor will handle the async work internally
     /// }
     /// ```
+    ///
+    /// ## Concurrency Safety
+    ///
+    /// This method automatically handles concurrency safety by:
+    /// - Using `UnCheckedSendable` to wrap objects for safe Task usage
+    /// - Executing reactor operations in a background Task
+    /// - Calling the `state(_:)` method directly without explicit main thread dispatch
     ///
     /// ## Error Handling
     ///
@@ -162,17 +178,15 @@ public extension Store {
     /// }
     /// ```
     ///
-    /// - Note: This method does nothing if `reducer` is `nil`.
-    func sendStore(_ input: Reactor.Input) {
+    /// - Note: This method does nothing if `reactor` is `nil`.
+    /// - Note: The method is non-async but internally uses `Task` for concurrency.
+    func send(_ input: Reactor.Input) {
         guard let reactor else { return }
         let unCheckableReactor = UnCheckedSendable(reactor)
         let unCheckableSelf = UnCheckedSendable(self)
         Task {
             guard let state = await unCheckableReactor.object?.flow(input: input) else { return }
-            await MainActor.run {
-                unCheckableSelf.object?.state(state)
-            }
+            unCheckableSelf.object?.state(state)
         }
     }
 }
-

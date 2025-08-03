@@ -72,24 +72,28 @@ import Foundation
  *
  * ## Thread Safety
  *
- * `Pulse` is thread-safe and can be safely accessed from multiple threads.
- * All property access is synchronized using an internal lock.
+ * `Pulse` ensures thread safety for update notifications by automatically
+ * dispatching handler calls to the main queue using `DispatchQueue.main.async`.
+ * The update handlers are always called on the main thread, making it safe
+ * for UI updates.
  */
 @propertyWrapper
-@MainActor
 public class Pulse<Value> {
 
     /// The actual stored value
     private var _value: Value
 
-    /// Internal lock for thread-safe access
-    private let lock: NSLocking = NSLock()
-
     /// Counter tracking the number of assignments made to this pulse
+    ///
+    /// When this value changes, it triggers the update handler on the main queue.
+    /// The handler is called asynchronously to ensure thread safety and proper
+    /// UI updates when used in concurrent contexts.
     private var assignedCount: UInt64 = .zero {
         didSet {
-            if oldValue != self.assignedCount {
-                self.updateHandler?(self._value)
+            let unCheckedSelf = UnCheckedSendable(self)
+            DispatchQueue.main.async {
+                guard let unCheckedValue = unCheckedSelf.object?._value else { return }
+                unCheckedSelf.object?.updateHandler?(unCheckedValue)
             }
         }
     }
@@ -127,18 +131,20 @@ public class Pulse<Value> {
     /// Setting this property stores the new value and triggers the update handler,
     /// even if the new value is identical to the current value.
     ///
-    /// - Note: All access is thread-safe and synchronized using an internal lock.
+    /// ## Thread Safety
+    ///
+    /// While the property can be accessed from any thread, the update handler
+    /// will always be called on the main thread via `DispatchQueue.main.async`.
+    /// This ensures safe UI updates when the pulse is used in concurrent contexts.
+    ///
+    /// - Note: The update handler is called asynchronously on the main queue.
     public var wrappedValue: Value {
         get {
-            self.lock.withLock {
-                return self._value
-            }
+            return self._value
         }
         set {
-            self.lock.withLock {
-                self._value = newValue
-                self.assignedCount &+= 1
-            }
+            self._value = newValue
+            self.assignedCount &+= 1
         }
     }
 
