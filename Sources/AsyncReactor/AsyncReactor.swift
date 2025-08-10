@@ -171,7 +171,7 @@ public protocol AsyncReactor: AnyObject {
     ///     }
     /// }
     /// ```
-    func reduce(_ input: Input) async -> Mutation
+    func reduce(_ input: Input) -> [Task<Mutation, Never>]
 
     /// Applies a mutation to the current state and returns the new state.
     ///
@@ -202,7 +202,7 @@ public protocol AsyncReactor: AnyObject {
     ///     return newState
     /// }
     /// ```
-    func mutate(_ state: State, mutation: Mutation) async -> State
+    func mutate(_ state: State, mutation: Mutation) -> State
 }
 
 /// Internal lock for thread-safe state access
@@ -220,11 +220,11 @@ internal extension AsyncReactor {
     var currentState: State {
         get {
             locking.withLock {
-                return Map.dictionary[self.currentStateKey]
+                return Map[self.currentStateKey]
             }
         } set {
             locking.withLock {
-                Map.dictionary[self.currentStateKey] = newValue
+                Map[self.currentStateKey] = newValue
             }
         }
     }
@@ -242,11 +242,21 @@ internal extension AsyncReactor {
     ///
     /// - Note: This method is `nonisolated` because it coordinates async operations
     ///   but doesn't directly access actor-isolated state.
-    nonisolated func flow(input: Input) async -> State {
-        let mutation = await self.reduce(input)
-        let newState = await self.mutate(self.currentState, mutation: mutation)
-        self.currentState = newState
-        return self.currentState
+    @MainActor
+    func flow(input: Input) -> AsyncStream<State> {
+        let mutationTasks = self.reduce(input)
+        return AsyncStream<State>.init { continuation in
+            Task {
+                for mutationTask in mutationTasks {
+                    let mutation = await mutationTask.value
+                    let oldState = self.currentState
+                    let newState = await self.mutate(oldState, mutation: mutation)
+                    self.currentState = newState
+                    continuation.yield(newState)
+                }
+                continuation.finish()
+            }
+        }
     }
 }
 
@@ -263,17 +273,4 @@ private extension AsyncReactor {
     }
 }
 
-/// Internal storage mechanism for reactor states.
-///
-/// This struct provides a global, thread-safe storage solution for all reactor states
-/// using `DynamicTypeDictionary` which replaces ReactorKit's `WeakMapTable`.
-private struct Map {
-    /// Global dictionary for storing all reactor states with type safety.
-    ///
-    /// Each reactor instance stores its state using a unique key generated from its
-    /// `ObjectIdentifier`, ensuring complete isolation between different reactor instances.
-    ///
-    /// - Note: Marked as `nonisolated(unsafe)` because thread safety is handled
-    ///   by the external locking mechanism in the `currentState` property.
-    nonisolated(unsafe) static let dictionary: DynamicTypeDictionary = .init()
-}
+nonisolated(unsafe) private let Map = DynamicTypeDictionary()
