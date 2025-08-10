@@ -6,11 +6,14 @@
 //
 
 import UIKit
+import Combine
 import AsyncReactor
 
 class ViewController: UIViewController, Store {
 
-    let reactor: ViewReactor? = .init()
+    typealias Reactor = ViewReactor
+
+    private var cancellable: Set<AnyCancellable> = []
 
     private let incrementButton: UIButton = {
         let button = UIButton(type: .system)
@@ -60,6 +63,8 @@ class ViewController: UIViewController, Store {
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        self.reactor = ViewReactor()
+
         self.view.addSubview(self.label)
         self.view.addSubview(self.stackView)
         self.view.addSubview(self.navigateButton)
@@ -87,16 +92,15 @@ class ViewController: UIViewController, Store {
     }
 
     func state(_ state: ViewReactor.State) {
-        state.$number.updated { [weak self] count in
-            self?.label.text = "\(count)"
-        }
-
-        state.$string.updated { string in
-            print("String :\(string)")
-        }
+        state.$number
+            .sink { [weak self] count in
+                self?.label.text = "\(count)"
+            }
+            .store(in: &self.cancellable)
     }
 
     @objc private func incrementButtonTapped(_ sender: UIButton) {
+        self.send(.increase)
         self.send(.increase)
     }
 
