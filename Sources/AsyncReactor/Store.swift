@@ -94,7 +94,8 @@ public protocol Store: AnyObject {
     ///     }
     /// }
     /// ```
-    var reactor: Reactor? { get }
+    @MainActor
+    var reactor: Reactor? { get set }
 
     /// Called whenever the reactor produces a new state.
     ///
@@ -120,6 +121,7 @@ public protocol Store: AnyObject {
     ///         }
     ///     }
     /// ```
+    @MainActor
     func state(_ state: Reactor.State)
 }
 
@@ -180,13 +182,34 @@ public extension Store {
     ///
     /// - Note: This method does nothing if `reactor` is `nil`.
     /// - Note: The method is non-async but internally uses `Task` for concurrency.
+    @MainActor
+    var reactor: Reactor? {
+        get {
+            Map[self.reactorMapKey]
+        } set {
+            if let newValue {
+                Map[self.reactorMapKey] = newValue
+                self.state(newValue.initialState())
+            }
+        }
+    }
+
+    @MainActor
     func send(_ input: Reactor.Input) {
         guard let reactor else { return }
-        let unCheckableReactor = UnCheckedSendable(reactor)
-        let unCheckableSelf = UnCheckedSendable(self)
         Task {
-            guard let state = await unCheckableReactor.object?.flow(input: input) else { return }
-            unCheckableSelf.object?.state(state)
+            for await state in reactor.flow(input: input) {
+                self.state(state)
+            }
         }
     }
 }
+
+private extension Store {
+
+    var reactorMapKey: DynamicTypeDictionaryKey<Optional<Self.Reactor>> {
+        .init(keyId: ObjectIdentifier(self).hashValue.description + "reactorMapKey", defaultValue: nil)
+    }
+}
+
+nonisolated(unsafe) private let Map = DynamicTypeDictionary()
