@@ -6,7 +6,7 @@
  */
 
 import Foundation
-
+import Combine
 /**
  * A property wrapper that triggers updates whenever a value is assigned, even if it's the same value.
  *
@@ -78,10 +78,12 @@ import Foundation
  * for UI updates.
  */
 @propertyWrapper
-public class Pulse<Value> {
+public class Pulse<Value>: @unchecked Sendable {
 
     /// The actual stored value
     private var _value: Value
+
+    private let locking: NSLocking = NSLock()
 
     /// Counter tracking the number of assignments made to this pulse
     ///
@@ -90,16 +92,13 @@ public class Pulse<Value> {
     /// UI updates when used in concurrent contexts.
     private var assignedCount: UInt64 = .zero {
         didSet {
-            let unCheckedSelf = UnCheckedSendable(self)
-            DispatchQueue.main.async {
-                guard let unCheckedValue = unCheckedSelf.object?._value else { return }
-                unCheckedSelf.object?.updateHandler?(unCheckedValue)
-            }
+            self.passthroughSubject.send(self._value)
         }
     }
 
+    private var passthroughSubject: PassthroughSubject<Value, Never> = .init()
+
     /// Handler called whenever the value is assigned (even if it's the same value)
-    private var updateHandler: ((Value) -> Void)? = nil
 
     /// Sets a handler to be called whenever the pulse value is assigned.
     ///
@@ -121,10 +120,6 @@ public class Pulse<Value> {
     /// alertMessage = "Error occurred"  // Handler called
     /// alertMessage = "Error occurred"  // Handler called again
     /// ```
-    public func updated(_ handler: @escaping (Value) -> Void) {
-        self.updateHandler = handler
-    }
-
     /// The wrapped value that triggers updates on every assignment.
     ///
     /// Getting this property returns the current value.
@@ -140,11 +135,15 @@ public class Pulse<Value> {
     /// - Note: The update handler is called asynchronously on the main queue.
     public var wrappedValue: Value {
         get {
-            return self._value
+            self.locking.withLock {
+                return self._value
+            }
         }
         set {
-            self._value = newValue
-            self.assignedCount &+= 1
+            self.locking.withLock {
+                self._value = newValue
+                self.assignedCount &+= 1
+            }
         }
     }
 
@@ -162,8 +161,8 @@ public class Pulse<Value> {
     ///     print("Message: \(value)")
     /// }
     /// ```
-    public var projectedValue: Pulse<Value> {
-        self
+    public var projectedValue: AnyPublisher<Value, Never> {
+        self.passthroughSubject.eraseToAnyPublisher()
     }
 
     /// Creates a new Pulse with the specified initial value.
@@ -178,5 +177,6 @@ public class Pulse<Value> {
     /// ```
     public init(wrappedValue: Value) {
         self._value = wrappedValue
+        self.wrappedValue = wrappedValue
     }
 }
