@@ -201,7 +201,12 @@ public final class Stub<Reactor: AsyncReactor> {
     ///     XCTAssertEqual(state3.count, 1)
     /// }
     /// ```
+    @MainActor
     public func test(input: Reactor.Input) async -> Reactor.State {
-        return await self.reactor.flow(input: input)
+        var resultState = self.initialState()
+        for await state in await self.reactor.flow(input: input) {
+            resultState = state
+        }
+        return resultState
     }
 }
